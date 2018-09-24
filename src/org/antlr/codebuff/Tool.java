@@ -21,6 +21,8 @@ import org.antlr.v4.runtime.atn.PredictionMode;
 import org.antlr.v4.runtime.dfa.DFA;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 import org.antlr.v4.runtime.misc.Utils;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.filefilter.DirectoryFileFilter;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,6 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -131,14 +134,18 @@ public class Tool {
 			return;
 		}
 
+		// multiple files from a dir
+		File outputDir = null;
+		File excludeFile = null;
+		
+		
 		String grammarName = null;
 		String startRule = null;
 		String corpusDir = null;
 		String indentS = "4";
 		String commentS = null;
-		String testFileName = null;
-		String outputFileName = null;
 		String fileExtension = null;
+		
 		int i = 0;
 		while ( i<args.length && args[i].startsWith("-") ) {
 			switch ( args[i] ) {
@@ -168,11 +175,19 @@ public class Tool {
 					break;
 				case "-o" :
 					i++;
-					outputFileName = args[i++];
+					outputDir = new File(args[i++]);
+					break;
+				case "-exclude" :
+					i++;
+					excludeFile = new File(args[i++]);
 					break;
 			}
 		}
-		testFileName = args[i]; // must be last
+		final File fileDir = new File(args[i]);
+		String[] extentions = new String[1];
+		extentions[0] = "java";
+		final Collection<File> testFiles = FileUtils.listFiles(fileDir,
+				extentions , true);
 
 		System.out.println("gramm: "+grammarName);
 		String parserClassName = grammarName+"Parser";
@@ -215,26 +230,45 @@ public class Tool {
 		LangDescriptor language = new LangDescriptor(grammarName, corpusDir, fileRegex,
 		                                             lexerClass, parserClass, startRule,
 		                                             indentSize, singleLineCommentType);
-		format(language, testFileName, outputFileName);
+		
+		// load all files up front
+		List<String> allFiles = getFilenames(new File(language.corpusDir), language.fileRegex);
+		
+		if ( excludeFile != null && allFiles.contains(excludeFile.getAbsolutePath()) ) {
+			allFiles.remove(excludeFile.getAbsolutePath());
+			if ( !allFiles.contains(excludeFile.getAbsolutePath())) {
+				System.out.println(excludeFile.toString() + " excluded from the training set.");
+				System.out.println(allFiles);
+			}
+		}
+		
+		List<InputDocument> documents = load(allFiles, language);
+		
+		Corpus corpus = new Corpus(documents, language);
+		corpus.train();
+		
+		outputDir.mkdirs();
+		for ( final File testFile : testFiles  ) {
+			//File outputFile = new File(outputDir, testFile.getName());
+			File outputFile = new File(outputDir + testFile.toString().substring( (int)fileDir.toString().length() ));
+			outputFile.getParentFile().mkdirs();
+			format(language, testFile.toString(), outputFile.toString(), corpus);
+		}
+		
 	}
 
 	public static void format(LangDescriptor language,
 	                          String testFileName,
-	                          String outputFileName)
+	                          String outputFileName,
+	                          Corpus corpus)
 		throws Exception
 	{
-		// load all files up front
-		List<String> allFiles = getFilenames(new File(language.corpusDir), language.fileRegex);
-		List<InputDocument> documents = load(allFiles, language);
-		// if in corpus, don't include in corpus
-		final String path = new File(testFileName).getAbsolutePath();
-		List<InputDocument> others = filter(documents, d -> !d.fileName.equals(path));
-		InputDocument testDoc = parse(testFileName, language);
-		Corpus corpus = new Corpus(others, language);
-		corpus.train();
+
 
 		Formatter formatter = new Formatter(corpus, language.indentSize, Formatter.DEFAULT_K,
 		                                    FEATURES_INJECT_WS, FEATURES_HPOS);
+		
+		InputDocument testDoc = parse(testFileName, language);
 		String output = formatter.format(testDoc, false);
 
 		if ( outputFileName!=null ) {
@@ -281,6 +315,8 @@ public class Tool {
 	{
 		List<InputDocument> documents = new ArrayList<>();
 		for (String fileName : fileNames) {
+			// System.out.print("Parsing file : ");
+			// System.out.println(fileName);
 			documents.add( parse(fileName, language) );
 		}
 		if ( documents.size()>0 ) {

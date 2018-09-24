@@ -78,12 +78,13 @@ public class Corpus {
 	public void train() throws Exception { train(true); }
 
 	public void train(boolean shuffleFeatureVectors) throws Exception {
+		System.out.println("Start training (collectTokenPairsAndSplitListInfo)");
 		collectTokenPairsAndSplitListInfo();
-
+		System.out.println("(trainOnSampleDocs)");
 		trainOnSampleDocs();
-
+		System.out.println("(randomShuffleInPlace)");
 		if ( shuffleFeatureVectors ) randomShuffleInPlace();
-
+		System.out.println("(buildTokenContextIndex)");
 		buildTokenContextIndex();
 	}
 
